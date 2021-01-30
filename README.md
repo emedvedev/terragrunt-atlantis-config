@@ -9,7 +9,7 @@
 
 ## What is this?
 
-[Atlantis](runatlantis.io) is an awesome tool for Terraform pull request automation. Each repo can have a YAML config file that defines Terraform module dependencies, so that PRs that affect dependent modules will automatically generate `terraform plan`s for those modules.
+[Atlantis](https://runatlantis.io) is an awesome tool for Terraform pull request automation. Each repo can have a YAML config file that defines Terraform module dependencies, so that PRs that affect dependent modules will automatically generate `terraform plan`s for those modules.
 
 [Terragrunt](https://terragrunt.gruntwork.io) is a Terraform wrapper, which has the concept of dependencies built into its configuration.
 
@@ -22,48 +22,45 @@ This tool creates Atlantis YAML configurations for Terragrunt projects by:
 
 This is especially useful for organizations that use monorepos for their Terragrunt config (as we do at Transcend), and have thousands of lines of config.
 
-## Installation and Usage
+## Integrate into your Atlantis Server
 
-Recommended: Install any version via go get:
+The recommended way to use this tool is to install it onto your Atlantis server, and then use a [Pre-Workflow hook](https://www.runatlantis.io/docs/pre-workflow-hooks.html#pre-workflow-hooks) to run it after every clone. This way, Atlantis can automatically determine what modules should be planned/applied for any change to your repository.
 
-```bash
-cd && GO111MODULE=on go get github.com/transcend-io/terragrunt-atlantis-config@master && cd -
+To get started, add a `pre_workflow_hooks` field to your `repos` section of your [server-side repo config](https://www.runatlantis.io/docs/server-side-repo-config.html#do-i-need-a-server-side-repo-config-file):
+
+```json
+"repos": {
+  "id": "<your_github_repo>",
+  "workflow": "default",
+  "pre_workflow_hooks": [{
+    "run": "terragrunt-atlantis-config generate --output atlantis.yaml --autoplan --parallel --create-workspace"
+  }]
+}
 ```
 
-Alternative: Install a stable versions via Homebrew:
+Then, make sure `terragrunt-atlantis-config` is present on your Atlantis server. There are many different ways to configure a server, but this example in [Packer](https://www.packer.io/) should show the bash commands you'll need just about anywhere:
 
-```bash
-brew install transcend-io/tap/terragrunt-atlantis-config
+```go
+variable terragrunt_atlantis_config_version {
+  default = "1.1.0"
+}
+
+build {
+  // ...
+  provisioner "shell" {
+    inline = [
+      "wget https://github.com/transcend-io/terragrunt-atlantis-config/releases/download/v${var.terragrunt_atlantis_config_version}/terragrunt-atlantis-config_${var.terragrunt_atlantis_config_version}_linux_amd64.tar.gz",
+      "sudo tar xf terragrunt-atlantis-config_${var.terragrunt_atlantis_config_version}_linux_amd64.tar.gz",
+      "sudo mv terragrunt-atlantis-config_${var.terragrunt_atlantis_config_version}_linux_amd64/terragrunt-atlantis-config_${var.terragrunt_atlantis_config_version}_linux_amd64 terragrunt-atlantis-config",
+      "sudo install terragrunt-atlantis-config /usr/local/bin",
+    ]
+    inline_shebang = "/bin/bash -e"
+  }
+  // ...
+}
 ```
 
-This module officially supports golang versions v1.13, v1.14, and v1.15
-
-Usage:
-
-```bash
-# From the root of your repo
-terragrunt-atlantis-config generate
-
-# or from anywhere
-terragrunt-atlantis-config generate --root /some/path/to/your/repo/root
-
-# output to a file
-terragrunt-atlantis-config generate --autoplan --output ./atlantis.yaml
-
-# enable auto plan
-terragrunt-atlantis-config generate --autoplan
-
-# define the workflow
-terragrunt-atlantis-config generate --workflow web --output ./atlantis.yaml
-
-# ignore parent terragrunt configs (those which don't reference a terraform module)
-terragrunt-atlantis-config generate --ignore-parent-terragrunt
-
-# Enable the project name creation
-terragrunt-atlantis-config generate --create-project-name
-```
-
-Finally, check the log output (or your output file) for the YAML.
+and just like that, your developers should never have to worry about an `atlantis.yaml` file, or even need to know what it is.
 
 ## Extra dependencies
 
@@ -92,10 +89,10 @@ In your `atlantis.yaml` file, you will end up seeing output like:
 - autoplan:
     enabled: false
     when_modified:
-    - '*.hcl'
-    - '*.tf*'
-    - some_extra_dep
-    - ../../.gitignore
+      - "*.hcl"
+      - "*.tf*"
+      - some_extra_dep
+      - ../../.gitignore
   dir: example-setup/extra_dependency
 ```
 
@@ -105,64 +102,39 @@ If you specify `extra_atlantis_dependencies` in the parent Terragrunt module, th
 2. Absolute paths will work as they would in a child module, and the path in the output will be relative from the child module to the absolute path
 3. Relative paths, like the string `"foo.json"`, will be evaluated as relative to the Child module. This means that if you need something relative to the parent module, you should use something like `"${get_parent_terragrunt_dir()}/foo.json"`
 
-## Custom workflows
+## All Flags
 
-By default, the `workflow` field of each project will be empty. But you can set a global default workflow name, and can also customize the workflow name for individual projects if you'd like.
+One way to customize the behavior of this module is through CLI flag values passed in at runtime. These settings will apply to all modules.
 
-To set a global workflow name that all projects will use, use the `--workflow` flag:
+| Flag Name                    | Description                                                                                                                                                                     | Default Value     |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- |
+| `--autoplan`                 | The default value for autoplan settings. Can be overriden by locals.                                                                                                            | false             |
+| `--automerge`                | Enables the automerge setting for a repo.                                                                                                                                       | false             |
+| `--cascade-dependencies`     | When true, dependencies will cascade, meaning that a module will be declared to depend not only on its dependencies, but all dependencies of its dependencies all the way down. | true              |
+| `--ignore-parent-terragrunt` | Ignore parent Terragrunt configs (those which don't reference a terraform module).<br>In most cases, this should be set to `true`                                               | true              |
+| `--parallel`                 | Enables `plan`s and `apply`s to happen in parallel. Will typically be used with `--create-workspace`                                                                            | true              |
+| `--create-workspace`         | Use different auto-generated workspace for each project. Default is use default workspace for everything                                                                        | false             |
+| `--create-project-name`      | Add different auto-generated name for each project                                                                                                                              | false             |
+| `--preserve-workflows`       | Preserves workflows from old output files. Useful if you want to define your workflow definitions on the client side                                                            | true              |
+| `--workflow`                 | Name of the workflow to be customized in the atlantis server. If empty, will be left out of output                                                                              | ""                |
+| `--approval-requirements`    | Requirements that must be satisfied before `atlantis apply` can be run. Currently the only supported requirements are `approved` and `mergeable`. Can be overridden by locals   | []                |
+| `--output`                   | Path of the file where configuration will be generated. Typically, you want a file named "atlantis.yaml". Default is to write to `stdout`.                                      | ""                |
+| `--root`                     | Path to the root directory of the git repo you want to build config for.                                                                                                        | current directory |
+| `--terraform-version`        | Default terraform version to specify for all modules. Can be overriden by locals                                                                                                | ""                |
+| `--ignore-dependency-blocks` | When true, dependencies found in `dependency` and `dependencies` blocks will be ignored                                                                                         | false             |
 
-```bash
-terragrunt-atlantis-config generate --workflow dev --output ./atlantis.yaml
-```
+## All Locals
 
-In this example, all projects will have `workflow: dev` set. 
+Another way to customize the output is to use `locals` values in your terragrunt modules. These can be set in either the parent or child terragrunt modules, and the settings will only affect the current module (or all child modules for parent locals).
 
-If you have multiple different workflows you want to use, you can set a `local` value in your terragrunt module with name `atlantis_workflow`, and a value of the workspace name you want to use.
-
-So if a terragrunt file contains:
-
-```hcl
-locals {
-  atlantis_workflow = "workflowA"
-}
-```
-
-it will have `workflow: workflowA` set in the atlantis.yaml settings.
-
-Workflow names can be specified in either parent or child terragrunt modules, but if both are specified then this module will use the workflow name specified from the child.
-
-## Auto Enforcement with Github Actions
-
-It's a best practice to require that `atlantis.yaml` stays up to date on each Pull Request.
-
-To make this easy, there is an open-source Github Action that will fail a status check on your PR if the `atlantis.yaml` file is out of date.
-
-To use it, add this yaml to a new github action file in your repo:
-
-```yaml
-name: terragrunt-atlantis-config
-on:
-  push:
-    paths:
-    - '**.hcl'
-    - '**.tf'
-    - '**.hcl.json'
-
-jobs:
-  terragrunt_atlantis_config:
-    runs-on: ubuntu-latest
-    name: Validate atlantis.yaml
-    steps:
-      - uses: actions/checkout@v2
-      - name: Ensure atlantis.yaml is up to date using terragrunt-atlantis-config
-        id: atlantis_validator
-        uses: transcend-io/terragrunt-atlantis-config-github-action@v0.0.3
-        with:
-          version: v0.9.7
-          extra_args: '--autoplan --parallel=false
-```
-
-You can customize the version and flags you typically pass to the `generate` command in those final two lines.
+| Locals Name                   | Description                                                                                                                                                    | type         |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| `atlantis_workflow`           | The custom atlantis workflow name to use for a module                                                                                                          | string       |
+| `atlantis_apply_requirements` | The custom `apply_requirements` array to use for a module                                                                                                      | list(string) |
+| `atlantis_terraform_version`  | Allows overriding the `--terraform-version` flag for a single module                                                                                           | string       |
+| `atlantis_autoplan`           | Allows overriding the `--autoplan` flag for a single module                                                                                                    | bool         |
+| `atlantis_skip`               | If true on a child module, that module will not appear in the output.<br>If true on a parent module, none of that parent's children will appear in the output. | bool         |
+| `extra_atlantis_dependencies` | See [Extra dependencies](https://github.com/transcend-io/terragrunt-atlantis-config#extra-dependencies)                                                        | list(string) |
 
 ## Separate workspace for parallel plan and apply
 
@@ -181,6 +153,34 @@ Enabling this feature may consume more resources like cpu, memory, network, and 
 
 As when defining the workspace this info is also needed when running `atlantis plan/apply -d ${git_root}/stage/app -w stage_app` to run the command on specific directory,
 you can also use the `atlantis plan/apply -p stage_app` in case you have enabled the `create-project-name` cli argument (it is `false` by default).
+
+## Local Installation and Usage
+
+You can install this tool locally to checkout what kinds of config it will generate for your repo, though in production it is recommended to [install this tool directly onto your Atlantis server](##integrate-into-your-atlantis-server)
+
+Recommended: Install any version via go get:
+
+```bash
+cd && GO111MODULE=on go get github.com/transcend-io/terragrunt-atlantis-config@v1.1.0 && cd -
+```
+
+This module officially supports golang versions v1.13, v1.14, and v1.15, tested on CircleCI with each build
+This module also officially supports both Windows and Nix-based file formats, tested on CircleCI with each build
+
+Usage Examples (see below sections for all options):
+
+```bash
+# From the root of your repo
+terragrunt-atlantis-config generate
+
+# or from anywhere
+terragrunt-atlantis-config generate --root /some/path/to/your/repo/root
+
+# output to a file
+terragrunt-atlantis-config generate --autoplan --output ./atlantis.yaml
+```
+
+Finally, check the log output (or your output file) for the YAML.
 
 ## Contributing
 

@@ -1,4 +1,4 @@
-VERSION=0.9.7
+VERSION=1.1.0
 PATH_BUILD=build/
 FILE_COMMAND=terragrunt-atlantis-config
 FILE_ARCH=darwin_amd64
@@ -6,7 +6,7 @@ S3_BUCKET_NAME=cloudfront-origin-homebrew-tap-transcend-io
 PROFILE=transcend-prod
 
 # Determine the arch/os combos we're building for
-XC_ARCH=386 amd64 arm
+XC_ARCH=amd64 arm
 XC_OS=linux darwin windows
 
 .PHONY: clean
@@ -30,6 +30,12 @@ build-all: clean
     -pv=$(VERSION) \
     -d=$(PATH_BUILD) \
     -build-ldflags "-X main.VERSION=$(VERSION)"
+
+.PHONY: gotestsum
+gotestsum:
+	mkdir -p cmd/test_artifacts
+	gotestsum
+	rm -rf cmd/test_artifacts
 
 .PHONY: test
 test:
